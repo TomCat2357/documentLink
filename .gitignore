@@ -1,0 +1,9 @@
+# clasp（scriptId を含むためコミットしない）
+.clasp.json
+
+# 依存・ビルド生成物
+node_modules/
+*.log
+
+# OS
+.DS_Store

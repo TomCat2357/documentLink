@@ -1,0 +1,285 @@
+<script>
+  // ───────────── 状態 ─────────────
+  var state = {
+    folderId: null,     // 現在たどっているフォルダ
+    rootFolderId: null, // 自文書のフォルダ（初期母集団）
+    data: null          // listFolderContents の結果
+  };
+
+  // ───────────── ユーティリティ ─────────────
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  function setStatus(el, msg, cls) {
+    el.textContent = msg || '';
+    el.className = 'status-line' + (cls ? ' ' + cls : '');
+  }
+  function spinner(el, on) { el.className = 'spinner' + (on ? ' on' : ''); }
+
+  // ───────────── 初期化 ─────────────
+  function init() {
+    google.script.run
+      .withSuccessHandler(onInitContext)
+      .withFailureHandler(onFail)
+      .getInitialContext();
+  }
+
+  function onInitContext(ctx) {
+    state.rootFolderId = ctx.folder.folderId;
+    renderFolder(ctx.folder);
+    renderOutbound(ctx.outbound);
+    renderInbound(ctx.inbound);
+  }
+
+  // ───────────── 候補（フォルダ階層） ─────────────
+  function renderFolder(data) {
+    state.folderId = data.folderId;
+    state.data = data;
+
+    $('breadcrumb').innerHTML =
+      '<span class="crumb-link" id="goRoot">自文書フォルダ</span>' +
+      ' / ' + esc(data.path || '');
+    var goRoot = $('goRoot');
+    if (goRoot) goRoot.onclick = function () { loadFolder(state.rootFolderId); };
+
+    var upHtml = '';
+    if (data.parentId) {
+      upHtml = '<li><span class="icon">↩</span>' +
+        '<span class="name clickable" data-up="' + esc(data.parentId) + '">.. 上のフォルダへ</span></li>';
+    }
+    renderCandidates(data, upHtml);
+  }
+
+  function renderCandidates(data, upHtml) {
+    var html = upHtml || '';
+    (data.folders || []).forEach(function (f) {
+      html += '<li>' +
+        '<span class="icon">📁</span>' +
+        '<span class="name clickable" data-folder="' + esc(f.id) + '">' + esc(f.name) + '</span>' +
+        '</li>';
+    });
+    (data.files || []).forEach(function (f) {
+      html += '<li>' +
+        '<span class="icon">📄</span>' +
+        '<span class="name">' + esc(f.name) + '</span>' +
+        '<button data-link="' + esc(f.id) + '">リンク</button>' +
+        '</li>';
+    });
+    if (!html) html = '<li class="empty">該当なし</li>';
+    var ul = $('candidates');
+    ul.innerHTML = html;
+
+    Array.prototype.forEach.call(ul.querySelectorAll('[data-folder]'), function (el) {
+      el.onclick = function () { loadFolder(el.getAttribute('data-folder')); };
+    });
+    Array.prototype.forEach.call(ul.querySelectorAll('[data-up]'), function (el) {
+      el.onclick = function () { loadFolder(el.getAttribute('data-up')); };
+    });
+    Array.prototype.forEach.call(ul.querySelectorAll('[data-link]'), function (el) {
+      el.onclick = function () { addLink(el.getAttribute('data-link'), el); };
+    });
+  }
+
+  function loadFolder(folderId) {
+    $('filter').value = '';
+    $('candidates').innerHTML = '<li class="empty">読み込み中…</li>';
+    google.script.run
+      .withSuccessHandler(renderFolder)
+      .withFailureHandler(onFail)
+      .listFolderContents(folderId);
+  }
+
+  // 絞り込み（サーバー側で前方一致優先）
+  var filterTimer = null;
+  function onFilterInput() {
+    clearTimeout(filterTimer);
+    var q = $('filter').value;
+    filterTimer = setTimeout(function () {
+      google.script.run
+        .withSuccessHandler(function (data) { renderCandidates(data, upHtmlFor(data)); })
+        .withFailureHandler(onFail)
+        .searchInFolder(state.folderId, q);
+    }, 180);
+  }
+  function upHtmlFor(data) {
+    if (!data.parentId) return '';
+    return '<li><span class="icon">↩</span>' +
+      '<span class="name clickable" data-up="' + esc(data.parentId) + '">.. 上のフォルダへ</span></li>';
+  }
+
+  // ───────────── リンク追加 ─────────────
+  function addLink(fileId, btn) {
+    if (btn) btn.disabled = true;
+    setStatus($('addStatus'), 'リンクを追加中…', '');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (btn) btn.disabled = false;
+        if (res.ok) {
+          setStatus($('addStatus'), 'リンクを追加しました。', 'ok');
+          renderOutbound(res.outbound);
+        } else {
+          setStatus($('addStatus'), res.error || '追加に失敗しました。', 'err');
+        }
+      })
+      .withFailureHandler(function (e) { if (btn) btn.disabled = false; onFail(e); })
+      .addOutboundLink(fileId, 'manual');
+  }
+
+  function addDirect() {
+    var v = $('directInput').value.trim();
+    if (!v) { setStatus($('addStatus'), 'URL または ID を入力してください。', 'err'); return; }
+    $('addDirect').disabled = true;
+    setStatus($('addStatus'), '解決して追加中…', '');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        $('addDirect').disabled = false;
+        if (res.ok) {
+          $('directInput').value = '';
+          setStatus($('addStatus'), 'リンクを追加しました。', 'ok');
+          renderOutbound(res.outbound);
+        } else {
+          setStatus($('addStatus'), res.error || '追加に失敗しました。', 'err');
+        }
+      })
+      .withFailureHandler(function (e) { $('addDirect').disabled = false; onFail(e); })
+      .addOutboundLink(v, 'manual');
+  }
+
+  // ───────────── outbound / inbound 表示 ─────────────
+  function linkLi(e, withRemove) {
+    var badges =
+      '<span class="badge ' + esc(e.source) + '">' + esc(e.source) + '</span>' +
+      '<span class="badge ' + esc(e.status) + '">' + esc(e.status) + '</span>';
+    var rm = withRemove
+      ? '<button data-remove="' + esc(e.fileId) + '">削除</button>' : '';
+    return '<li>' +
+      '<span class="grow">' +
+        '<a href="' + esc(e.fileUrl) + '" target="_blank">' + esc(e.displayName || e.fileId) + '</a>' +
+        '<div class="small muted">' + esc(e.folderPath || '') + '</div>' +
+      '</span>' +
+      badges + rm +
+    '</li>';
+  }
+
+  function renderOutbound(list) {
+    var ul = $('outbound');
+    if (!list || !list.length) { ul.innerHTML = '<li class="empty">なし</li>'; return; }
+    ul.innerHTML = list.map(function (e) { return linkLi(e, true); }).join('');
+    Array.prototype.forEach.call(ul.querySelectorAll('[data-remove]'), function (el) {
+      el.onclick = function () { removeLink(el.getAttribute('data-remove')); };
+    });
+  }
+
+  function renderInbound(list) {
+    var ul = $('inbound');
+    if (!list || !list.length) { ul.innerHTML = '<li class="empty">なし（同期で更新）</li>'; return; }
+    ul.innerHTML = list.map(function (e) { return linkLi(e, false); }).join('');
+  }
+
+  function removeLink(fileId) {
+    google.script.run
+      .withSuccessHandler(function (res) { renderOutbound(res.outbound); })
+      .withFailureHandler(onFail)
+      .removeOutboundLink(fileId);
+  }
+
+  // ───────────── 同期 ─────────────
+  function syncNow() {
+    $('syncBtn').disabled = true;
+    spinner($('syncSpinner'), true);
+    setStatus($('syncStatus'), '', '');
+    google.script.run
+      .withSuccessHandler(function (s) {
+        $('syncBtn').disabled = false;
+        spinner($('syncSpinner'), false);
+        var msg = '順方向 ' + s.outboundUpdated + ' 件更新 / 逆引き ' +
+          s.inboundPushed + ' 件 / broken ' + s.broken.length + ' 件';
+        setStatus($('syncStatus'), msg, s.broken.length ? 'err' : 'ok');
+        renderOutbound(s.outbound);
+        renderInbound(s.inbound);
+      })
+      .withFailureHandler(function (e) {
+        $('syncBtn').disabled = false;
+        spinner($('syncSpinner'), false);
+        onFail(e);
+      })
+      .syncNow();
+  }
+
+  // ───────────── 外部リンク取り込み ─────────────
+  function scanExternal() {
+    $('scanBtn').disabled = true;
+    spinner($('scanSpinner'), true);
+    $('externalArea').innerHTML = '';
+    google.script.run
+      .withSuccessHandler(function (res) {
+        $('scanBtn').disabled = false;
+        spinner($('scanSpinner'), false);
+        renderExternal(res.candidates);
+      })
+      .withFailureHandler(function (e) {
+        $('scanBtn').disabled = false;
+        spinner($('scanSpinner'), false);
+        onFail(e);
+      })
+      .scanExternalLinks();
+  }
+
+  function renderExternal(cands) {
+    var area = $('externalArea');
+    if (!cands || !cands.length) {
+      area.innerHTML = '<div class="empty">取り込める外部リンクは見つかりませんでした。</div>';
+      return;
+    }
+    var html = '<div class="small muted">取り込む候補にチェックを入れてください。</div>';
+    cands.forEach(function (c, i) {
+      html += '<div class="check-row">' +
+        '<input type="checkbox" id="ext' + i + '" value="' + esc(c.fileId) + '"' +
+          (c.resolvable ? ' checked' : '') + '>' +
+        '<label for="ext' + i + '" class="grow">' +
+          esc(c.name) +
+          ' <span class="small muted">' + esc(c.folderPath || '') + '</span>' +
+          (c.resolvable ? '' : ' <span class="badge broken">解決不能</span>') +
+        '</label>' +
+      '</div>';
+    });
+    html += '<div class="row" style="margin-top:6px">' +
+      '<button class="primary" id="importBtn">選択分を取り込む</button>' +
+      '<span class="status-line grow" id="importStatus"></span></div>';
+    area.innerHTML = html;
+    $('importBtn').onclick = importExternal;
+  }
+
+  function importExternal() {
+    var checks = $('externalArea').querySelectorAll('input[type=checkbox]:checked');
+    var ids = Array.prototype.map.call(checks, function (c) { return c.value; });
+    if (!ids.length) { setStatus($('importStatus'), '選択がありません。', 'err'); return; }
+    $('importBtn').disabled = true;
+    setStatus($('importStatus'), '取り込み中…', '');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        setStatus($('importStatus'), res.imported + ' 件取り込みました。', 'ok');
+        renderOutbound(res.outbound);
+        scanExternal(); // 残り候補を更新
+      })
+      .withFailureHandler(function (e) { $('importBtn').disabled = false; onFail(e); })
+      .importExternalLinks(ids);
+  }
+
+  // ───────────── 失敗ハンドラ ─────────────
+  function onFail(err) {
+    setStatus($('addStatus'), 'エラー: ' + (err && err.message ? err.message : err), 'err');
+  }
+
+  // ───────────── イベント結線 ─────────────
+  document.addEventListener('DOMContentLoaded', function () {
+    $('filter').addEventListener('input', onFilterInput);
+    $('addDirect').addEventListener('click', addDirect);
+    $('syncBtn').addEventListener('click', syncNow);
+    $('scanBtn').addEventListener('click', scanExternal);
+    init();
+  });
+</script>

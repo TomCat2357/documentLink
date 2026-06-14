@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <?!= include('Stylesheet'); ?>
+  </head>
+  <body>
+
+    <!-- 1. リンク追加 -->
+    <h2>リンク追加</h2>
+    <div class="breadcrumb" id="breadcrumb">読み込み中…</div>
+    <input type="search" id="filter" placeholder="名前で絞り込み（前方/部分一致）" autocomplete="off">
+    <ul class="list" id="candidates"><li class="empty">読み込み中…</li></ul>
+
+    <div class="row">
+      <input type="text" id="directInput" class="grow" placeholder="ファイル URL または ID を直接指定">
+      <button id="addDirect">追加</button>
+    </div>
+    <div class="status-line" id="addStatus"></div>
+
+    <!-- 2. 現在のリンク -->
+    <h2>順方向リンク（outbound）</h2>
+    <ul class="list" id="outbound"><li class="empty">—</li></ul>
+
+    <h2>逆引きリンク（inbound）</h2>
+    <ul class="list" id="inbound"><li class="empty">—</li></ul>
+
+    <!-- 3. 同期 -->
+    <h2>同期</h2>
+    <div class="row">
+      <button class="primary" id="syncBtn">今すぐ同期</button>
+      <span class="spinner" id="syncSpinner">同期中…</span>
+    </div>
+    <div class="status-line" id="syncStatus"></div>
+
+    <!-- 4. 外部リンク取り込み -->
+    <h2>本文の外部リンク取り込み</h2>
+    <div class="row">
+      <button id="scanBtn">本文をスキャン</button>
+      <span class="spinner" id="scanSpinner">スキャン中…</span>
+    </div>
+    <div id="externalArea"></div>
+
+    <?!= include('JavaScript'); ?>
+  </body>
+</html>
