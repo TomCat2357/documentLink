@@ -1,0 +1,17 @@
+{
+  "timeZone": "Asia/Tokyo",
+  "runtimeVersion": "V8",
+  "exceptionLogging": "STACKDRIVER",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/script.container.ui"
+  ],
+  "addOns": {
+    "common": {
+      "name": "議会答弁ノートリンク",
+      "logoUrl": "https://www.gstatic.com/images/icons/material/system/1x/link_black_24dp.png"
+    },
+    "docs": {}
+  }
+}
